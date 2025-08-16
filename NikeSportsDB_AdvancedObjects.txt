@@ -1,0 +1,178 @@
+
+-- =============================================
+-- Nike Sports Database Management System
+-- Advanced SQL Objects: Views, Audit Table, Triggers, Stored Procedure, UDF, Cursor
+-- =============================================
+
+-- 1. VIEWS
+
+-- View 1: Customer Orders Greater Than $100
+CREATE VIEW CustomerHighValueOrders AS
+SELECT 
+    c.customerid,
+    c.firstname + ' ' + c.lastname AS customer_name,
+    o.orderid,
+    o.totalprice,
+    o.orderdate
+FROM CUSTOMER c
+JOIN ORDERS o ON c.customerid = o.customerid
+WHERE o.totalprice > 100;
+
+-- View 2: Recently Launched Products (Release Year 2024 or Later)
+CREATE VIEW RecentProducts AS
+SELECT 
+    productid,
+    productname,
+    category,
+    size,
+    color,
+    release_date,
+    price
+FROM PRODUCT
+WHERE YEAR(release_date) >= 2024;
+
+-- View 3: Low Stock Products (Inventory Quantity < 10)
+CREATE VIEW LowStockProducts AS
+SELECT 
+    productid,
+    productname,
+    quantity,
+    vendorid
+FROM INVENTORY
+WHERE quantity < 10;
+
+-- =============================================
+-- 2. AUDIT TABLE FOR PRODUCT
+-- =============================================
+
+CREATE TABLE ProductAudit (
+    audit_id INT IDENTITY(1,1) PRIMARY KEY,
+    operation_type NVARCHAR(50) NOT NULL, 
+    productid VARCHAR(15) NOT NULL,
+    productname NVARCHAR(50),
+    category NVARCHAR(30),
+    release_date DATE,
+    price MONEY,
+    modified_by NVARCHAR(50), 
+    modified_on DATETIME NOT NULL DEFAULT GETDATE() 
+);
+
+-- =============================================
+-- 3. TRIGGERS FOR PRODUCT
+-- =============================================
+
+-- Trigger for INSERT
+CREATE TRIGGER trg_Product_Insert
+ON PRODUCT
+AFTER INSERT
+AS
+BEGIN
+    INSERT INTO ProductAudit (operation_type, productid, productname, category, release_date, price, modified_by)
+    SELECT 'INSERT', productid, productname, category, release_date, price, SUSER_SNAME()
+    FROM INSERTED;
+END;
+
+-- Trigger for UPDATE
+CREATE TRIGGER trg_Product_Update
+ON PRODUCT
+AFTER UPDATE
+AS
+BEGIN
+    INSERT INTO ProductAudit (operation_type, productid, productname, category, release_date, price, modified_by)
+    SELECT 'UPDATE', productid, productname, category, release_date, price, SUSER_SNAME()
+    FROM INSERTED;
+END;
+
+-- Trigger for DELETE
+CREATE TRIGGER trg_Product_Delete
+ON PRODUCT
+AFTER DELETE
+AS
+BEGIN
+    INSERT INTO ProductAudit (operation_type, productid, productname, category, release_date, price, modified_by)
+    SELECT 'DELETE', productid, productname, category, release_date, price, SUSER_SNAME()
+    FROM DELETED;
+END;
+
+-- =============================================
+-- 4. STORED PROCEDURE: Retrieve Recently Launched Products
+-- =============================================
+
+CREATE PROCEDURE GetRecentProducts
+AS
+BEGIN
+    SELECT 
+        productid,
+        productname,
+        category,
+        release_date,
+        price
+    FROM PRODUCT
+    WHERE YEAR(release_date) >= 2024
+    ORDER BY release_date DESC;
+END;
+
+-- =============================================
+-- 5. USER DEFINED FUNCTION: Calculate Total Order Value
+-- =============================================
+
+CREATE FUNCTION CalculateTotalOrderValue (@orderid VARCHAR(15))
+RETURNS MONEY
+AS
+BEGIN
+    DECLARE @total MONEY;
+    SELECT @total = SUM(quantity * totalprice)
+    FROM ORDERS
+    WHERE orderid = @orderid;
+    RETURN @total;
+END;
+
+-- =============================================
+-- 6. CURSOR: Customer Total Spending Summary
+-- =============================================
+
+DECLARE @customerid VARCHAR(20);
+DECLARE @customer_name NVARCHAR(50);
+DECLARE @total_spent MONEY;
+
+-- Temporary table to store results
+CREATE TABLE #CustomerSpendingSummary (
+    customerid VARCHAR(20),
+    customer_name NVARCHAR(50),
+    total_spent MONEY
+);
+
+DECLARE customer_cursor CURSOR FOR
+SELECT 
+    c.customerid,
+    c.firstname + ' ' + c.lastname AS customer_name
+FROM CUSTOMER c;
+
+OPEN customer_cursor;
+
+FETCH NEXT FROM customer_cursor INTO @customerid, @customer_name;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SELECT @total_spent = SUM(quantity * totalprice)
+    FROM ORDERS
+    WHERE customerid = @customerid;
+
+    INSERT INTO #CustomerSpendingSummary (customerid, customer_name, total_spent)
+    VALUES (@customerid, @customer_name, ISNULL(@total_spent, 0));
+
+    FETCH NEXT FROM customer_cursor INTO @customerid, @customer_name;
+END;
+
+CLOSE customer_cursor;
+DEALLOCATE customer_cursor;
+
+-- Display the result
+SELECT * FROM #CustomerSpendingSummary ORDER BY total_spent DESC;
+
+-- Drop the temporary table
+DROP TABLE #CustomerSpendingSummary;
+
+-- =============================================
+-- End of Advanced SQL Objects Script
+-- =============================================
